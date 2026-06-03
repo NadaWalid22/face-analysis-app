@@ -1,0 +1,25 @@
+__pycache__/
+*.py[cod]
+.eggs/
+*.egg-info/
+dist/
+build/
+.env
+.venv/
+venv/
+
+# Data
+data/sample/*.jpg
+data/sample/*.png
+data/sample/*.jpeg
+!data/sample/README.md
+
+# Results
+results/*.png
+results/*.jpg
+
+# Jupyter
+.ipynb_checkpoints/
+
+# macOS
+.DS_Store

@@ -1,0 +1,16 @@
+# Face Analysis App — configuration
+
+detector:
+  max_faces: 1
+  min_detection_confidence: 0.5
+  min_tracking_confidence: 0.5
+  refine_landmarks: true        # use 468+10 model (adds iris landmarks)
+
+analyzer:
+  score_scale: 0.05             # exp(-asymmetry_iod / scale)
+                                # score_scale=0.05 → asymmetry 5% IOD maps to score 0.37
+
+app:
+  server_port: 7860
+  share: false                  # set true for temporary public URL
+  max_image_size_px: 2048       # resize larger images before processing
