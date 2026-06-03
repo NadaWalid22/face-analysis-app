@@ -1,12 +1,11 @@
 """
-Face landmark detector using MediaPipe Face Mesh.
+Face landmark detector using MediaPipe Face Landmarker (Tasks API).
 
-MediaPipe Face Mesh returns 468 3D facial landmarks normalized to [0,1].
-This wrapper provides:
-  - Pixel-space landmark coordinates (x, y)
-  - Confidence score
-  - Named landmark groups (eyes, eyebrows, nose, lips, jawline, midline)
-  - Bilateral landmark pairs for symmetry computation
+MediaPipe 0.10.14+ removed the legacy `mp.solutions` API.
+This module uses the new Tasks API which works on all current versions.
+
+The face_landmarker.task model (~1.4 MB) is downloaded at first use and
+cached locally. It returns 478 landmarks (468 face + 10 iris).
 
 Reference:
   Kartynnik et al., 2019 — Real-time Facial Surface Geometry from Monocular Video
@@ -15,7 +14,10 @@ Reference:
 
 from __future__ import annotations
 
+import os
+import urllib.request
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 
 import cv2
@@ -24,8 +26,27 @@ import numpy as np
 
 
 # ---------------------------------------------------------------------------
+# Model download
+# ---------------------------------------------------------------------------
+
+MODEL_URL = (
+    "https://storage.googleapis.com/mediapipe-models/"
+    "face_landmarker/face_landmarker/float16/1/face_landmarker.task"
+)
+MODEL_PATH = Path(__file__).parent / "face_landmarker.task"
+
+
+def _ensure_model() -> str:
+    """Download model if not cached, return local path."""
+    if not MODEL_PATH.exists():
+        print(f"Downloading face_landmarker.task from Google Storage...")
+        urllib.request.urlretrieve(MODEL_URL, str(MODEL_PATH))
+        print(f"Model saved to {MODEL_PATH} ({MODEL_PATH.stat().st_size // 1024} KB)")
+    return str(MODEL_PATH)
+
+
+# ---------------------------------------------------------------------------
 # Landmark index groups (MediaPipe Face Mesh 468-point model)
-# Source: https://github.com/google/mediapipe/blob/master/mediapipe/modules/face_geometry/data/canonical_face_model_uv_visualization.png
 # ---------------------------------------------------------------------------
 
 LANDMARK_GROUPS = {
@@ -40,34 +61,23 @@ LANDMARK_GROUPS = {
     "jawline": [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288,
                 397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136,
                 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109, 10],
-    "midline": [10, 151, 9, 8, 168, 6, 197, 195, 5, 4, 1, 19, 94, 2, 164, 0, 11, 12, 13, 14, 15, 16, 17, 18, 200, 199, 175, 152],
+    "midline": [10, 151, 9, 8, 168, 6, 197, 195, 5, 4, 1, 19, 94, 2,
+                164, 0, 11, 12, 13, 14, 15, 16, 17, 18, 200, 199, 175, 152],
 }
 
-# Bilateral pairs (left_idx, right_idx) — symmetric landmark pairs across midline
-# These are used to compute left/right facial asymmetry
+# Bilateral pairs (left_idx, right_idx) across the facial midline
 BILATERAL_PAIRS = [
-    # Outer eye corners
-    (33, 263),
-    # Inner eye corners
-    (133, 362),
-    # Eye centers (approx)
-    (159, 386),
-    # Eyebrow outer
-    (46, 276),
-    # Eyebrow inner
-    (107, 336),
-    # Cheekbones
-    (234, 454),
-    # Nasolabial fold
-    (205, 425),
-    # Lip corners
-    (61, 291),
-    # Upper lip
-    (37, 267),
-    # Jaw lateral
-    (172, 397),
-    # Jaw lower
-    (136, 365),
+    (33, 263),    # outer eye corners
+    (133, 362),   # inner eye corners
+    (159, 386),   # eye centers
+    (46, 276),    # eyebrow outer
+    (107, 336),   # eyebrow inner
+    (234, 454),   # cheekbones
+    (205, 425),   # nasolabial fold
+    (61, 291),    # lip corners
+    (37, 267),    # upper lip
+    (172, 397),   # jaw lateral
+    (136, 365),   # jaw lower
 ]
 
 
@@ -80,44 +90,52 @@ class LandmarkResult:
     image_size: tuple[int, int]      # (height, width)
     detection_confidence: float
 
-    # Per-group landmark coordinates (pixel-space)
     groups: dict[str, np.ndarray] = field(default_factory=dict)
-
-    # Midline center of the face (x-coordinate) derived from symmetry axis
     midline_x: float = 0.0
 
 
 class FaceLandmarkDetector:
-    """Thin wrapper around MediaPipe Face Mesh.
+    """Face landmark detector using the MediaPipe Tasks API (mediapipe >= 0.10.14).
 
     Args:
         max_faces:          Maximum number of faces to detect (default 1).
-        min_detection_conf: Minimum detection confidence threshold.
-        min_tracking_conf:  Minimum tracking confidence threshold.
-        refine_landmarks:   Use refined 468+10 model (adds iris landmarks).
+        min_detection_conf: Minimum face detection confidence.
+        min_presence_conf:  Minimum face presence confidence.
+        min_tracking_conf:  Minimum tracking confidence.
     """
 
     def __init__(
         self,
         max_faces: int = 1,
         min_detection_conf: float = 0.5,
+        min_presence_conf: float = 0.5,
         min_tracking_conf: float = 0.5,
+        # Legacy arg kept for call-site compatibility — ignored in Tasks API
         refine_landmarks: bool = True,
     ) -> None:
-        self._mp_face_mesh = mp.solutions.face_mesh
-        self._face_mesh = self._mp_face_mesh.FaceMesh(
-            static_image_mode=True,
-            max_num_faces=max_faces,
-            refine_landmarks=refine_landmarks,
-            min_detection_confidence=min_detection_conf,
+        model_path = _ensure_model()
+
+        BaseOptions = mp.tasks.BaseOptions
+        FaceLandmarkerOptions = mp.tasks.vision.FaceLandmarkerOptions
+        RunningMode = mp.tasks.vision.RunningMode
+
+        options = FaceLandmarkerOptions(
+            base_options=BaseOptions(model_asset_path=model_path),
+            running_mode=RunningMode.IMAGE,
+            num_faces=max_faces,
+            min_face_detection_confidence=min_detection_conf,
+            min_face_presence_confidence=min_presence_conf,
             min_tracking_confidence=min_tracking_conf,
+            output_face_blendshapes=False,
+            output_facial_transformation_matrixes=False,
         )
+        self._landmarker = mp.tasks.vision.FaceLandmarker.create_from_options(options)
 
     def detect(self, image: np.ndarray) -> Optional[LandmarkResult]:
-        """Detect facial landmarks in a BGR or RGB uint8 image.
+        """Detect facial landmarks in an RGB uint8 image.
 
         Args:
-            image: (H, W, 3) uint8 numpy array (BGR from OpenCV, or RGB).
+            image: (H, W, 3) uint8 numpy array in RGB colour space.
 
         Returns:
             LandmarkResult if a face is detected, else None.
@@ -127,59 +145,47 @@ class FaceLandmarkDetector:
 
         h, w = image.shape[:2]
 
-        # MediaPipe expects RGB
-        rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB) if _is_bgr(image) else image
-        results = self._face_mesh.process(rgb)
+        # Ensure RGB uint8
+        rgb = image if image.dtype == np.uint8 else (image * 255).astype(np.uint8)
 
-        if not results.multi_face_landmarks:
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+        result = self._landmarker.detect(mp_image)
+
+        if not result.face_landmarks:
             return None
 
-        face = results.multi_face_landmarks[0]
+        face = result.face_landmarks[0]   # NormalizedLandmark list (478 pts)
 
-        # Convert normalized [0,1] coordinates to pixel space
-        pts = np.array([[lm.x * w, lm.y * h] for lm in face.landmark], dtype=np.float32)
-        pts_3d = np.array([[lm.x, lm.y, lm.z] for lm in face.landmark], dtype=np.float32)
+        # Convert normalized → pixel coordinates (use first 468 for compatibility)
+        n = min(468, len(face))
+        pts    = np.array([[lm.x * w, lm.y * h] for lm in face[:n]], dtype=np.float32)
+        pts_3d = np.array([[lm.x, lm.y, lm.z]  for lm in face[:n]], dtype=np.float32)
 
-        # Confidence: MediaPipe FaceMesh doesn't expose per-landmark confidence;
-        # we use the presence value if available, else 1.0
-        conf = getattr(results, "multi_face_detection", None)
-        confidence = 1.0 if conf is None else float(results.multi_face_detection[0].score[0])
-
-        # Build per-group dicts
         groups = {
-            name: pts[np.array(indices)]
+            name: pts[np.array([i for i in indices if i < n])]
             for name, indices in LANDMARK_GROUPS.items()
-            if max(indices) < len(pts)
         }
 
-        # Midline x = average of midline landmark x-coords
-        midline_pts = pts[np.array(LANDMARK_GROUPS["midline"])]
-        midline_x = float(midline_pts[:, 0].mean())
+        midline_pts = pts[np.array([i for i in LANDMARK_GROUPS["midline"] if i < n])]
+        midline_x   = float(midline_pts[:, 0].mean())
 
         return LandmarkResult(
             landmarks=pts,
             landmarks_3d=pts_3d,
             image_size=(h, w),
-            detection_confidence=confidence,
+            detection_confidence=1.0,
             groups=groups,
             midline_x=midline_x,
         )
 
     def close(self) -> None:
-        self._face_mesh.close()
+        self._landmarker.close()
 
     def __enter__(self):
         return self
 
     def __exit__(self, *args):
         self.close()
-
-
-def _is_bgr(image: np.ndarray) -> bool:
-    """Heuristic: assume BGR if the image looks like it came from cv2.imread."""
-    # This is always True when using cv2.imread; users can override with rgb=True.
-    # We expose this as a module-level helper for the wrapper.
-    return True
 
 
 def load_image(path: str) -> np.ndarray:

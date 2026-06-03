@@ -20,5 +20,8 @@ results/*.jpg
 # Jupyter
 .ipynb_checkpoints/
 
+# MediaPipe model cache
+src/landmarks/*.task
+
 # macOS
 .DS_Store
