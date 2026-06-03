@@ -8,10 +8,9 @@ build/
 .venv/
 venv/
 
-# Data
-data/sample/*.jpg
-data/sample/*.png
-data/sample/*.jpeg
+# Data — exclude uploads, keep bundled examples
+data/sample/uploads/
+!data/sample/example_*.jpg
 !data/sample/README.md
 
 # Results

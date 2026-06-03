@@ -9,6 +9,7 @@ Run locally:
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -20,6 +21,9 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+SAMPLE_DIR = Path(__file__).parent.parent / "data" / "sample"
+EXAMPLES = sorted([str(p) for p in SAMPLE_DIR.glob("example_*.jpg")])
 
 from src.landmarks.detector import FaceLandmarkDetector, load_image
 from src.symmetry.analyzer import FaceSymmetryAnalyzer
@@ -141,6 +145,13 @@ with gr.Blocks(theme=gr.themes.Soft(), title="Face Symmetry Analysis") as demo:
 
     with gr.Row():
         input_image = gr.Image(label="Upload portrait", type="numpy", height=400)
+
+    if EXAMPLES:
+        gr.Examples(
+            examples=EXAMPLES,
+            inputs=input_image,
+            label="Try an example (AI-generated faces — no real people)",
+        )
 
     with gr.Row():
         analyze_btn = gr.Button("Analyze", variant="primary", size="lg")
