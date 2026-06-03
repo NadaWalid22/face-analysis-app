@@ -148,8 +148,8 @@ with gr.Blocks(theme=gr.themes.Soft(), title="Face Symmetry Analysis") as demo:
 
     if EXAMPLES:
         gr.Examples(
-            examples=EXAMPLES,
-            inputs=input_image,
+            examples=[[p] for p in EXAMPLES],
+            inputs=[input_image],
             label="Try an example (AI-generated faces — no real people)",
         )
 
